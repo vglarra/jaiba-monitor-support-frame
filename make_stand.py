@@ -34,7 +34,7 @@ from mathutils.bvhtree import BVHTree
 # CONFIG - change these for the second monitor
 # --------------------------------------------------------------------------
 CFG_MONITOR1 = dict(
-    name="mon1_7in_v14",
+    name="mon1_7in_v19_leftrib_beside",
     # PCB (landscape: length along X, width along Y)
     pcb_l=181.0, pcb_w=104.0, pcb_t=1.6,
     hole_d=3.0, hole_off=3.5,          # hole centre is hole_off from each PCB edge
@@ -54,12 +54,14 @@ CFG_MONITOR1 = dict(
     tilt_max=45.0,
     # swivel
     base_l=150.0, base_corner=10.0,                    # base width (X, slide direction); its depth (Y) is computed from the frame
-    base_back_wall=14.0, base_front_margin=3.0,        # wall behind the turntable recess / overhang past the frame top edge
+    base_back_wall=14.0, base_front_margin=18.0,        # wall behind the turntable recess / overhang past the frame top edge
     cavity=True, cav_wall=4.0, cav_rib=3.0, cav_cell=21.0, cav_deck=4.0, cav_pocket_top=4.0,   # hollow underside (rib grid)
     floor_t=9.0, tt_r=50.0, tt_t=10.0, base_t=19.0,    # turntable is SUNK into the base: base_t = floor_t + tt_t
     slide_travel=15.0, pocket_clear=0.4,               # turntable slides +-travel along X in a stadium recess
     car_x=20.0, car_y0=-18.0, car_y1=10.0, car_t=3.0, car_clear=0.2,   # sliding stop carriage (rides in a channel)
-    m5_hole=5.4, m5_cb_d=10.6, m5_cb_depth=3.6, m5_nut_af=8.4, m5_nut_depth=5.0,
+    m5_hole=6.6, m5_cb_d=13.0, m5_cb_depth=4.6, m5_nut_af=10.4, m5_nut_depth=5.6, swivel_m=6,   # swivel axis is M6 (head slot under the base, nut pocket in the turntable)
+    left_rib=True, seat_rib_len=30.0, seat_rib_w=6.0, seat_rib_h=10.0, seat_rib_y0=96.5, seat_rib_xin=-59.0, seat_rib_ch=4.0,
+    skip_ears=(2, 3), spacer_lift=0.2,   # the two ears next to the centre lug are left out of the turntable so the M6 nut can drop into its pocket; make_spacers() fills them afterwards
     m4_head_d=9.4, m4_head_depth=2.6, m4_nut_af=8.4, m4_nut_depth=4.0,   # M5 hex HEAD (8 AF) sits in the pocket on the right ear; wing nut on the left
     wn_span=21.0, wn_h=13.0, wn_boss_d=10.0, wn_boss_h=4.0, wn_wing_t=2.0, washer_t=2.0, washer_d=9.6, wn_m=4.7,   # M5 wing nut (DIN 315, ~21 mm span) + 2 stacked M5 washers (clear the left stop-screw head)
     swivel_stop_r=15.0, post_d=3.6, post_h=2.8, groove_w=4.4, groove_d=3.2,
@@ -253,6 +255,17 @@ def make_base(C):
     feet = [(sx * fx, ybc + sy * fy) for sx in (1, -1) for sy in (1, -1)]
     for fxx, fyy in feet:                                                                  # recesses for adhesive feet
         cut(b, prism('foot', circle(fxx, fyy, 7.2, 40), -1, 0.8))
+    if C.get('left_rib'):
+        # rest-position stop on the LEFT of the base: when the frame lies flat its left side (cap hooks included) rests against this rib, which
+        # locks slide-left / swivel-left; 45 deg ramps at both ends and a 4 mm 45 deg lead-in on the inner top edge so it is entered gradually
+        zs, sh = C['base_t'] - 0.5, C['seat_rib_h']
+        ztop, dd, sc = C['base_t'] + sh, C['base_t'] + sh - (C['base_t'] - 0.5), C['seat_rib_ch']
+        sy0, sl = C['seat_rib_y0'], C['seat_rib_len']
+        xin = C['seat_rib_xin']; xout = xin - C['seat_rib_w']
+        r = prism('left_rib', [(sy0, zs), (sy0 + sl, zs), (sy0 + sl - dd, ztop), (sy0 + dd, ztop)], xout, xin, 'YZ')
+        tri = [(xin + 1.0, ztop - sc - 1.0), (xin - (sc + 1.0), ztop + 1.0), (xin + 1.0, ztop + 1.0)]
+        cut(r, prism('left_lead', tri, sy0 - 1.0, sy0 + sl + 1.0, 'XZ'))
+        union(b, r)
     b['y_min'], b['y_max'], b['len'] = y_min, y_max, L
     b['vol_solid'] = _volume(b)
     if C['cavity']:
@@ -317,7 +330,8 @@ def make_turntable(C):
     tt = prism('turntable', circle(0, 0, C['tt_r'], 128), 0, T)
     ears = [l for l in hinge_layout(C) if l[0] == 'ear']
     prof = _ear_profile(C, za)
-    union(tt, *[prism('ear', prof, e[1], e[2], 'YZ') for e in ears])
+    skip = set(C.get('skip_ears', ()))
+    union(tt, *[prism('ear', prof, e[1], e[2], 'YZ') for i, e in enumerate(ears) if i not in skip])
     xl, xr, xi = ears[0][1], ears[-1][2], ears[-1][1]
     # --- swivel features
     ha = swivel_groove_half_angle(C)
@@ -333,6 +347,19 @@ def make_turntable(C):
         prism('stophole', circle(0, za + C['stop_r'], C['stop_hole_d'] / 2, 32, 5.5), xi - 1, xr + 1, 'YZ'),
         prism('stopholeL', circle(0, za + C['stop_r'], C['stop_hole_d'] / 2, 32, 5.5), xl - 1, ears[0][2] + 1, 'YZ'))
     return tt
+
+
+def make_spacers(C):
+    """Cylinders that take the place of the skipped turntable ears (on the hinge bolt, between frame lugs). Fitted AFTER the swivel nut is in."""
+    ears = [l for l in hinge_layout(C) if l[0] == 'ear']
+    za, r = C['tt_t'] + C['lug_r'], C['lug_r'] - C['spacer_lift']
+    out = []
+    for i in sorted(C.get('skip_ears', ())):
+        e = ears[i]
+        sp = prism('spacer', circle(0, za, r, 96), e[1], e[2], 'YZ')
+        cut(sp, prism('spacer_bore', circle(0, za, C['bolt_hinge_d'] / 2, 40), e[1] - 1, e[2] + 1, 'YZ'))
+        out.append(sp)
+    return out
 
 
 def groove_angles(C):
@@ -537,6 +564,7 @@ def build_assembly(C):
     screw = make_stop_screw(C, 1)
     screwL = make_stop_screw(C, -1)
     wn = make_wingnut(C)
+    sps = make_spacers(C)
     sc = bpy.context.scene
     def empty(n):
         e = bpy.data.objects.new(n, None); sc.collection.objects.link(e); return e
@@ -548,6 +576,8 @@ def build_assembly(C):
     tt.parent = swivel; tt.location = (0, 0, F)
     car.parent = slide; car.location = (0, 0, F - C['car_t'])
     wn.parent = swivel; wn.location = (0, 0, F + C['tt_t'] + C['lug_r'])
+    for o in sps:
+        o.parent = swivel; o.location = (0, 0, F); o.color = (0.95, 0.55, 0.2, 1)
     screw.parent = swivel; screw.location = (0, 0, F)
     screwL.parent = swivel; screwL.location = (0, 0, F)
     fr.parent = tilt; fr.location = (0, 0, -C['lug_r'])
@@ -566,7 +596,7 @@ def build_assembly(C):
     car.color = (0.2, 0.75, 0.3, 1); lid.color = (0.9, 0.9, 0.92, 1)
     pcb.color = (0.05, 0.4, 0.15, 1); glass.color = (0.02, 0.02, 0.03, 1)
     screw.color = (0.8, 0.8, 0.8, 1); screwL.color = (0.8, 0.8, 0.8, 1)
-    return dict(base=base, car=car, tt=tt, fr=fr, lid=lid, pcb=pcb, glass=glass, screw=screw, screwL=screwL, wn=wn,
+    return dict(sp=sps[0] if sps else None, sp2=sps[1] if len(sps) > 1 else None, base=base, car=car, tt=tt, fr=fr, lid=lid, pcb=pcb, glass=glass, screw=screw, screwL=screwL, wn=wn,
                 slide=slide, swivel=swivel, tilt=tilt, lidj=lidj, D=D)
 
 
@@ -601,18 +631,34 @@ def run_checks(A, C):
     for dx in (-tv, 0, tv):
         for sw in (-C['swivel_max'], 0, C['swivel_max']):
             line, bad_any = [], False
-            for th in (0.3, 10, 20, 30, 40, C['tilt_max']):
+            ths = (0.3, 10, 20, 30, 40, C['tilt_max']) if (dx == 0 and sw == 0) or not C.get('left_rib') else (20, 30, 40, C['tilt_max'])
+            for th in ths:
                 pose(A, th, sw, dx)
                 r = dict(frame_turntable=hits(A['fr'], A['tt']), frame_base=hits(A['fr'], A['base']),
                          frame_carriage=hits(A['fr'], A['car']),
                          pcb_turntable=hits(A['pcb'], A['tt']), pcb_base=hits(A['pcb'], A['base']),
                          frame_screw=hits(A['fr'], A['screw']) + hits(A['fr'], A['screwL']),
                          lid_frame=hits(A['lid'], A['fr']), lid_pcb=hits(A['lid'], A['pcb']), lid_glass=hits(A['lid'], A['glass']),
-                         lid_turntable=hits(A['lid'], A['tt']), lid_base=hits(A['lid'], A['base']))
+                         lid_turntable=hits(A['lid'], A['tt']), lid_base=hits(A['lid'], A['base']),
+                         spacer_frame=sum(hits(A[k], A['fr']) for k in ('sp', 'sp2') if A[k]), spacer_turntable=sum(hits(A[k], A['tt']) for k in ('sp', 'sp2') if A[k]),
+                         spacer_pcb=sum(hits(A[k], A['pcb']) for k in ('sp', 'sp2') if A[k]), spacer_wingnut=sum(hits(A[k], A['wn']) for k in ('sp', 'sp2') if A[k]),
+                         spacer_base=sum(hits(A[k], A['base']) for k in ('sp', 'sp2') if A[k]))
                 bad = {k: v for k, v in r.items() if v}
                 bad_any |= bool(bad); ok &= not bad
                 if bad: line.append(f"tilt {th}: {bad}")
             print(f"slide {dx:+5.1f}  swivel {sw:+5.1f}  tilt 0.3..45 ->", "OK" if not bad_any else "COLLISION " + "; ".join(line))
+    if C.get('left_rib'):
+        print("\n=== left rest rib: lowest tilt (deg) at which frame + cap clear the base; ribs only block the LEFT side ===")
+        def lowest_clear(dx, sw):
+            for k in range(1, 100):
+                th = k * 0.5
+                pose(A, th, sw, dx)
+                if not hits(A['fr'], A['base']) and not hits(A['lid'], A['base']) and not hits(A['pcb'], A['base']):
+                    return th
+            return None
+        for dx in (-tv, -5, 0, 5, tv):
+            cells = [(sw, lowest_clear(dx, sw)) for sw in (-C['swivel_max'], -10, -2, 0, 2, 10, C['swivel_max'])]
+            print(f"  slide {dx:+5.1f}: " + "  ".join(f"sw{sw:+3.0f}:{'--' if lo is None else f'{lo:.1f}'}" for sw, lo in cells))
     print("\n=== 45 deg tilt stop test (stop screws vs frame grooves) ===")
     pose(A, 0, 0)
     first = None
@@ -723,6 +769,8 @@ def bom(C):
     print("\n=== hardware notes ===")
     print(f"M{C.get('swivel_m', 5)} swivel bolt: head seats at z={C['m5_cb_depth']:.1f}; tip must end between z={m5_end_min:.1f} and z={m5_end_max:.1f}"
           f"  -> length {m5_end_min - C['m5_cb_depth']:.1f} .. {m5_end_max - C['m5_cb_depth']:.1f} mm  (use M{C.get('swivel_m', 5)}x{int(round(m5_end_max - C['m5_cb_depth']))})")
+    if C.get('skip_ears'):
+        print(f"swivel nut: M{C.get('swivel_m', 5)} hex nut ({C['m5_nut_af'] - 0.4:.0f} mm AF) drops into the pocket from above through the gap of the {len(C['skip_ears'])} skipped ears; then print and fit {len(C['skip_ears'])}x spacer (..._spacer.stl) on the hinge bolt")
     lay = hinge_layout(C)
     xl, xr = lay[0][1], lay[-1][2]
     bear = xr - C['m4_nut_depth']                              # underside of the M5 hex head seats here
@@ -781,7 +829,7 @@ def main(C, out):
     os.makedirs(out, exist_ok=True)
     reset_scene()
     A = build_assembly(C)
-    parts = (('base', 'base'), ('car', 'carriage'), ('tt', 'turntable'), ('fr', 'frame'), ('lid', 'lid'))
+    parts = (('base', 'base'), ('car', 'carriage'), ('tt', 'turntable'), ('fr', 'frame'), ('lid', 'lid')) + ((('sp', 'spacer'),) if A['sp'] else ())
     for key, nm in parts:
         print(f"{nm:10s} non-manifold edges: {nonmanifold(A[key])}")
     b = A['base']

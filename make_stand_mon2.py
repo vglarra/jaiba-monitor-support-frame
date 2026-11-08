@@ -32,9 +32,9 @@ ms.hinge_layout = hinge_layout
 
 CFG2 = dict(ms.CFG_MONITOR1)
 CFG2.update(
-    name="mon2_11in6_v16_ribs",
+    name="mon2_11in6_v18_seatribs",
     # --- base / turntable scaled up for the heavier monitor
-    spacer_lift=0.2, rib_y=22.0, rib_clear=0.3, base_l=290.0, tt_r=57.0, base_back_wall=28.0, foot_x=128.0, slide_travel=40.0, swivel_m=6, m5_hole=6.6, m5_cb_d=13.0, m5_cb_depth=4.6, m5_nut_af=10.4, m5_nut_depth=5.6,
+    spacer_lift=0.2, seat_rib_len=30.0, seat_rib_w=6.0, seat_rib_h=10.0, seat_rib_gap=1.0, seat_rib_y0=62.0, seat_rib_ch=4.0, lock_rib_h=7.0, lock_rib_w=4.0, lock_rib_bx=16.0, base_l=290.0, tt_r=57.0, base_back_wall=28.0, foot_x=128.0, slide_travel=40.0, swivel_m=6, m5_hole=6.6, m5_cb_d=13.0, m5_cb_depth=4.6, m5_nut_af=10.4, m5_nut_depth=5.6,
     # --- VESA plate (holes are on the top face of the control box, 23 mm above the monitor back panel)
     plate_t=8.0, y0=8.5, lug_ramp_y=30.0,        # plate 8 mm (3.6 mm floor under the M4 heads); each lug ramps into the plate over 30 mm
    
@@ -165,6 +165,10 @@ def make_frame2(C):
     return fr
 
 
+def ms_plate_w2(C):
+    return frame_dims2(C)['plate_w']
+
+
 def make_base2(C):
     """Base + lock features in the back wall: a rectangular tunnel for the choke block (opens into the turntable recess),
     two clearance holes for the thumb screws and two open-top slots that capture the M6 nuts.  Rib grid kept solid around them."""
@@ -182,7 +186,35 @@ def make_base2(C):
     for sx in (-1, 1):
         x = sx * C['lock_screw_x']
         cuts.append(prism('lk_hole', circle(x, zc, C['lock_hole_d'] / 2, 32, 4.5), ymin - 1.0, ch0 + 0.5, 'XZ'))
-        cuts.append(prism('lk_nutslot', xz(x - nx, x + nx, zc - nz, C['base_t'] + 6.0), yn - nt / 2, yn + nt / 2, 'XZ'))
+        cuts.append(prism('lk_nutslot', xz(x - nx, x + nx, zc - nz, C['base_t'] + C['lock_rib_h'] + 2.0), yn - nt / 2, yn + nt / 2, 'XZ'))
+    # raised U-shaped ribs round each nut slot (back bar over the screw hole + a side bar each side): the wall behind the slot is only ~6 mm thick
+    # and has ~2 mm of material over the hole, so this carries the screw clamp load into the 28 mm wall
+    hr, rw, bx = C['lock_rib_h'], C['lock_rib_w'], C['lock_rib_bx']
+    y_back, y_fwd = yn - nt / 2, yn + nt / 2 + 4.0
+    z0 = C['base_t'] - 0.5
+    ribs = []
+    for sx in (-1, 1):
+        x = sx * C['lock_screw_x']
+        ztop = C['base_t'] + hr
+        d = ztop - z0                                                   # 45 deg ramps: the rib starts at base-top level and rises gradually
+        ribs.append(prism('lk_rib_back', [(x - bx, z0), (x + bx, z0), (x + bx - d, ztop), (x - bx + d, ztop)], ymin, y_back, 'XZ'))
+        for sg in (-1, 1):
+            xa, xb = sorted((x + sg * nx, x + sg * (nx + rw)))
+            ribs.append(prism('lk_rib_side', [(ymin, z0), (y_fwd, z0), (y_fwd - d, ztop), (ymin, ztop)], xa, xb, 'YZ'))
+    # seat ribs: when the frame is tilted down flat it drops BETWEEN these two ribs (plate half width + gap), which centres it and locks slide + swivel
+    pw = ms_plate_w2(C) / 2 + C['seat_rib_gap']
+    sy0, sl, sh, sw_, sc = C['seat_rib_y0'], C['seat_rib_len'], C['seat_rib_h'], C['seat_rib_w'], C['seat_rib_ch']
+    zs, ztop = C['base_t'] - 0.5, C['base_t'] + sh
+    dd = ztop - zs
+    for sg in (-1, 1):
+        xin, xout = sg * pw, sg * (pw + sw_)
+        xa, xb = min(xin, xout), max(xin, xout)
+        r = prism('seat_rib', [(sy0, zs), (sy0 + sl, zs), (sy0 + sl - dd, ztop), (sy0 + dd, ztop)], xa, xb, 'YZ')    # 45 deg ramp at both ends
+        # 45 deg lead-in on the inner top edge so the plate is funnelled to the middle
+        tri = [(xin - sg * 1.0, ztop - sc - 1.0), (xin + sg * (sc + 1.0), ztop + 1.0), (xin - sg * 1.0, ztop + 1.0)]
+        cut(r, prism('seat_lead', tri, sy0 - 1.0, sy0 + sl + 1.0, 'XZ'))
+        ribs.append(r)
+    union(b, *ribs)
     cut(b, *cuts)
     return b
 
@@ -220,16 +252,6 @@ def make_turntable2(C):
     mid = len(ears) // 2                                              # the ear over the swivel nut is left out: the nut drops in from above here, then make_spacer() fills the gap
     union(tt, *[prism('ear', ms._ear_profile(C, za), e[1], e[2], 'YZ') for i, e in enumerate(ears) if i != mid])
     xl, xr = ears[0][1], ears[-1][2]
-    # --- gusset ribs between neighbouring ears, in front of the hinge axis (y<0): they tie the ear bases together and widen the footing.
-    #     Kept outside the swept frame-lug disc (r = lug_r - lug_clear) by rib_clear + clear, and at y<0 where the frame lug has no ramp.
-    kept = [e for i, e in enumerate(ears) if i != mid]
-    Rc = Rl + C['rib_clear']
-    for e0, e1 in zip(kept[:-1], kept[1:]):
-        a, b = e0[2] - 0.4, e1[1] + 0.4
-        rib = prism('rib', hull(circle(0, za, Rl, 64) + [(-C['rib_y'], T - 1), (0.0, T - 1)]), a, b, 'YZ')
-        cut(rib, prism('rib_disc', circle(0, za, Rc, 64), a - 1, b + 1, 'YZ'),
-                 prism('rib_half', [(0.0, T - 3), (40.0, T - 3), (40.0, T + 40), (0.0, T + 40)], a - 1, b + 1, 'YZ'))
-        union(tt, rib)
     ha = ms.swivel_groove_half_angle(C)
     off = math.degrees(math.asin((C['stop_screw_d'] / 2) / C['stop_r']))
     a0, a1 = -(off + 2.5), C['tilt_max'] + off                       # static angles swept by the frame-mounted stop screw (0 = ahead, 90 = up)
@@ -353,7 +375,8 @@ def run_checks2(A, C):
     for dx in (-tv, 0, tv):
         for sw in (-C['swivel_max'], 0, C['swivel_max']):
             line, bad_any = [], False
-            for th in (0.3, 10, 20, 30, 45, 60, 75, 85, C['tilt_max']):
+            ths = (0.3, 10, 20, 30, 45, 60, 75, 85, C['tilt_max']) if (dx == 0 and sw == 0) else (20, 30, 45, 60, 75, 85, C['tilt_max'])
+            for th in ths:
                 pose(A, th, sw, dx)
                 bad = {f"{a}-{b}": n for a, b in pairs if (n := hits(A[a], A[b]))}
                 bad_any |= bool(bad); ok &= not bad
@@ -364,6 +387,17 @@ def run_checks2(A, C):
                 zmin = min((A['mon'].matrix_world @ v.co).z for v in A['mon'].data.vertices) - C['base_t']
                 if zmin < min_clear: min_clear, min_at = zmin, (dx, sw, th)
             print(f"slide {dx:+5.1f}  swivel {sw:+5.1f}  tilt 0.3..45 ->", "OK" if not bad_any else "COLLISION " + "; ".join(line))
+    print("\nseat ribs: lowest tilt (deg) at which the frame clears the base ribs; the plate lies flat only when centred between them:")
+    def lowest_clear(dx, sw):
+        for k in range(1, 120):
+            th = k * 0.5
+            pose(A, th, sw, dx)
+            if not hits(A['fr'], A['base']):
+                return th
+        return None
+    for dx in (-tv, -10, -2, 0, 2, 10, tv):
+        cells = [(sw, lowest_clear(dx, sw)) for sw in (-C['swivel_max'], -10, -2, 0, 2, 10, C['swivel_max'])]
+        print(f"  slide {dx:+5.1f}: " + "  ".join(f"sw{sw:+3.0f}:{'--' if lo is None else f'{lo:.1f}'}" for sw, lo in cells))
     print(f"\nlowest point of the monitor above the base top over all poses: {min_clear:.1f} mm  (slide/swivel/tilt = {min_at})")
     print(f"tipping: monitor CG stays inside the base footprint by at least {worst_margin:.1f} mm  "
           f"(worst pose slide/swivel/tilt = {worst_at[:3]}, CG xyz = {worst_at[3:]})")
