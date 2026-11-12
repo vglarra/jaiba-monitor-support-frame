@@ -32,9 +32,9 @@ ms.hinge_layout = hinge_layout
 
 CFG2 = dict(ms.CFG_MONITOR1)
 CFG2.update(
-    name="mon2_11in6_v18_seatribs",
+    name="mon2_11in6_v21_m4ends",
     # --- base / turntable scaled up for the heavier monitor
-    spacer_lift=0.2, seat_rib_len=30.0, seat_rib_w=6.0, seat_rib_h=10.0, seat_rib_gap=1.0, seat_rib_y0=62.0, seat_rib_ch=4.0, lock_rib_h=7.0, lock_rib_w=4.0, lock_rib_bx=16.0, base_l=290.0, tt_r=57.0, base_back_wall=28.0, foot_x=128.0, slide_travel=40.0, swivel_m=6, m5_hole=6.6, m5_cb_d=13.0, m5_cb_depth=4.6, m5_nut_af=10.4, m5_nut_depth=5.6,
+    spacer_lift=0.2, left_rib=False, base_monitor_margin=10.0, case_hole_n=3, case_hole_x=135.0, case_hole_span=83.8, case_hole_d=4.5, case_cb_d=8.2, case_cb_depth=4.6, case_end_back=7.7, case_end_front=6.5, seat_rib_len=30.0, seat_rib_w=6.0, seat_rib_h=10.0, seat_rib_gap=1.0, seat_rib_y0=62.0, seat_rib_ch=4.0, lock_rib_h=7.0, lock_rib_w=4.0, lock_rib_bx=16.0, base_l=290.0, tt_r=57.0, base_back_wall=28.0, foot_x=128.0, slide_travel=40.0, swivel_m=6, m5_hole=6.6, m5_cb_d=13.0, m5_cb_depth=4.6, m5_nut_af=10.4, m5_nut_depth=5.6,
     # --- VESA plate (holes are on the top face of the control box, 23 mm above the monitor back panel)
     plate_t=8.0, y0=8.5, lug_ramp_y=30.0,        # plate 8 mm (3.6 mm floor under the M4 heads); each lug ramps into the plate over 30 mm
    
@@ -175,7 +175,18 @@ def make_base2(C):
     R = C['tt_r'] + C['pocket_clear'] / 2
     ymin = -(R + C['base_back_wall'])
     hx = C['lock_block_len'] / 2 + 6.0
-    b = ms.make_base(dict(C, keep_solid=[(-hx - 2.0, hx + 2.0, ymin - 1.0, -R + 4.0)]))
+    # the base is also the cover of the computer case: its front edge reaches the TOP EDGE of the monitor at rest (tilt 0) plus base_monitor_margin,
+    # so the monitor sits behind that line and the case edge protects it
+    C = dict(C, base_front_margin=C['vesa_yc'] + C['body_above'] + C['base_monitor_margin'] - frame_dims2(C)['y_top'])
+    # M4 socket-head screw holes (case fastening): case_hole_n per long side, evenly spread about the middle of the base, solid boss kept round each
+    yb1 = C['vesa_yc'] + C['body_above'] + C['base_monitor_margin']
+    yc_b = (ymin + yb1) / 2
+    hy = [yc_b + (i - (C['case_hole_n'] - 1) / 2) * 2 * C['case_hole_span'] / max(1, C['case_hole_n'] - 1) for i in range(C['case_hole_n'])]
+    hpts = [(sx * C['case_hole_x'], y) for sx in (-1, 1) for y in hy]
+    # + one hole on the centre line at each end: back wall between the two lock thumb screws, and the front edge opposite them
+    hpts += [(0.0, ymin + C['case_end_back']), (0.0, yb1 - C['case_end_front'])]
+    keep = [(-hx - 2.0, hx + 2.0, ymin - 1.0, -R + 4.0)] + [(x - 7.0, x + 7.0, y - 7.0, y + 7.0) for x, y in hpts]
+    b = ms.make_base(dict(C, keep_solid=keep))
     zc, yp, bt = C['lock_z'], -R, C['lock_block_t']
     ch0 = yp - bt - 1.5
     def xz(x0, x1, z0, z1): return [(x0, z0), (x1, z0), (x1, z1), (x0, z1)]
@@ -215,7 +226,11 @@ def make_base2(C):
         cut(r, prism('seat_lead', tri, sy0 - 1.0, sy0 + sl + 1.0, 'XZ'))
         ribs.append(r)
     union(b, *ribs)
+    for x, y in hpts:
+        cuts.append(prism('case_hole', circle(x, y, C['case_hole_d'] / 2, 32), -1, C['base_t'] + 1))
+        cuts.append(prism('case_cb', circle(x, y, C['case_cb_d'] / 2, 32), C['base_t'] - C['case_cb_depth'], C['base_t'] + 1))
     cut(b, *cuts)
+    b['case_holes'] = hpts
     return b
 
 
